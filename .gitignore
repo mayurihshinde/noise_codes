@@ -1,0 +1,7 @@
+*.swp
+*.swo
+*.swn
+*.svn
+src_valgrind
+src_old
+noise_codes_czti

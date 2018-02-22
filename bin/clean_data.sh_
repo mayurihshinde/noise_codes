@@ -1,0 +1,102 @@
+#clean_data.sh
+#Ajay Vibhute,
+#Mayuri Shinde
+#19 Sept 2017
+#Script takes level2 file, mkf file, bunch file, saaconfig, noise config and generates 
+#level2 cleaned file
+#Steps :
+#1.cztdataselection- for removing saa
+#2.cztnoisypixclean- for removing noisy pixels
+#3.cztsuperbunchclean - for removing super bunches 
+#4.cztheavybunchclean - for removing heavy bunches 
+#5.cztflickpixclean - for removing flickering pixels
+#6.cztdatasel
+#7.cztevtclean
+#8.cztbindata
+
+
+#datadir="/home/cztipoc/Mayuri/cztipoc/noise_reduction/data_for_testing/grbtest/orbit_04229"
+#mkffile=$datadir/AS1G05_240T01_9000000536_04229czt_level2.mkf
+#saaconfig=$datadir/saaThreshold
+#eventfile=$datadir/AS1G05_240T01_9000000536_04229cztM0_level2.evt
+#caldbbadpix=$datadir/AS1cztbadpix20160809v01.fits
+#bunchfile=$datadir/AS1G05_240T01_9000000536_04229cztM0_level2_bunch.fits
+#noiseconfigfile=$datadir/noiseReductionThreshold
+#caldblld=$datadir/AS1cztlld20160517v01.fits
+
+mkffile=$1
+saaconfig=$2
+eventfile=$3
+caldbbadpix=$4
+bunchfile=$5
+noiseconfigfile=$6
+caldblld=$7
+sbcconfig=$CZTNOISECLEAN/config/superBunchCleanThreshold.txt
+hbcconfig=$CZTNOISECLEAN/config/heavyBunchThreshold.txt
+fcconfig=$CZTNOISECLEAN/config/flickPixThreshold.txt
+
+echo "Executing data selection, will create multiple files";
+echo "cztdataselection $mkffile $saaconfig $eventfile "
+
+cztdataselection $mkffile $saaconfig $eventfile	$eventfile
+
+temp=`echo $eventfile| sed 's/.evt//'`
+lsstr="$temp""_""*[0-9].evt"
+
+echo "Executing cztnoisypix clean"
+for f in `ls $lsstr`;
+do
+	echo "Running cztnoisypix clean for $f"
+	echo "cztnoisypixclean $f $caldbbadpix $bunchfile $noiseconfigfile $f"
+
+	cztnoisypixclean $f $caldbbadpix $bunchfile $noiseconfigfile $f
+	noisecleanedfile=`echo $f|sed 's/.evt/_nc.evt/'`
+	noisebadpixfile=`echo $f|sed 's/.evt/_badpix_nc.fits/'`
+	noiselivetime=`echo $f|sed 's/.evt/_nc_livetime.fits/'`
+	
+	orbitno=`echo $noisecleanedfile |cut -d'_' -f 4|sed 's/cztM0//'`
+	echo "Running cztsuperbunchclean for $noisecleanedfile"
+	cztsuperbunchclean $noisecleanedfile $bunchfile $noiselivetime $orbitno $noisecleanedfile
+
+	superbunchcleanevt=`echo $f|sed 's/.evt/_nc_sbc.evt/'`
+	superbunchlivetime=`echo $f|sed 's/.evt/_nc_sbc_livetime.fits/'`
+	echo "Running cztheavybunchclean for $superbunchcleanevt"
+	cztheavybunchclean $superbunchcleanevt $bunchfile $caldblld $superbunchcleanevt
+
+
+	heavybunchcleanevt=`echo $f|sed 's/.evt/_nc_sbc_hbc.evt/'`
+	echo "Running cztflickpixclean for $heavybunchcleanevt"
+	cztflickpixclean $heavybunchcleanevt $noisebadpixfile $heavybunchcleanevt	 
+
+	flickcleanevt=`echo $f|sed 's/.evt/_nc_sbc_hbc_fc.evt/'`
+	flickbadpixfile=`echo $f|sed 's/.evt/_badpix_nc_fc.fits/'`
+	echo "Running czteventseperation for $flickcleanevt"
+	czteventsep $flickcleanevt $f
+
+	eventsepevt=`echo $f|sed 's/.evt/_single.evt/'`
+	dscleanevt=`echo $f|sed 's/.evt/_single_ds.evt/'`
+	echo "Running cztdatasel"
+	cztdatasel infile=$eventsepevt gtifile=$eventsepevt gtitype="quad" outfile=$dscleanevt clobber="y" history="y"
+
+
+	cleanevt=`echo $f|sed 's/.evt/_clean.evt/'`
+	echo "Running cztevt clean"
+	
+	cztevtclean infile=$dscleanevt outfile=$cleanevt alphaval="0" vetorange="0-0" clobber="y" history="y" 
+	
+	echo "Running cztbindata"
+	#j=0
+	#for i in 0-50 50-100 100-1000
+	#do
+		bindataout=`echo $f|sed 's/.evt/_/'`
+		#bindataout=$bindataout"E"$i"_lc"
+		wtevt=`echo $f|sed 's/.evt/.wevt/'`
+		#echo $bindataout $wtevt 
+
+		cztbindata inevtfile=$cleanevt mkffile=$mkffile  badpixfile=$flickbadpixfile livetimefile=$superbunchlivetime outfile=$bindataout outevtfile=$wtevt maskWeight="no" rasrc="1" decsrc="1" badpixThreshold=0 outputtype="lc" timebinsize="1" energyrange="-" clobber="y"
+
+		#AS1A02_111T01_9000000954cztM0_level2_6_E50-100_lc_Q1.lc
+		#echo "Running non_poissonian_identification script for $i"
+		#ipython $CZTNOISECLEAN/bin/non_poissonian_identification.py $bindataout"_Q0.lc" $bindataout"_Q1.lc" $bindataout"_Q2.lc" $bindataout"_Q3.lc" $i
+	#done
+done	
